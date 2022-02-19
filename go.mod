@@ -1,4 +1,4 @@
-module github.com/seedboxtech/eh-dynamo
+module github.com/project-longbridge/eh-dynamo
 
 go 1.16
 
