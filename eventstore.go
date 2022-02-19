@@ -91,6 +91,10 @@ func NewEventStoreWithDB(config *EventStoreConfig, db *dynamo.DB) *EventStore {
 	return s
 }
 
+func (s *EventStore) Close() error {
+	return nil
+}
+
 // Save implements the Save method of the eventhorizon.EventStore interface.
 func (s *EventStore) Save(ctx context.Context, events []eh.Event, originalVersion int) error {
 	if len(events) == 0 {
