@@ -94,12 +94,14 @@ func NewEventStoreWithDB(config *EventStoreConfig, db *dynamo.DB) *EventStore {
 // Save implements the Save method of the eventhorizon.EventStore interface.
 func (s *EventStore) Save(ctx context.Context, events []eh.Event, originalVersion int) error {
 	if len(events) == 0 {
-		return eh.EventStoreError{
-			Err:       eh.ErrNoEventsToAppend,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return &eh.EventStoreError{
+			Err: eh.ErrMissingEvents,
+			Op:  eh.EventStoreOpSave,
 		}
 	}
 
+	id := events[0].AggregateID()
+	at := events[0].AggregateType()
 	// Build all event records, with incrementing versions starting from the
 	// original aggregate version.
 	aggregateID := events[0].AggregateID()
@@ -108,17 +110,25 @@ func (s *EventStore) Save(ctx context.Context, events []eh.Event, originalVersio
 	for _, event := range events {
 		// Only accept events belonging to the same aggregate.
 		if event.AggregateID() != aggregateID {
-			return eh.EventStoreError{
-				Err:       eh.ErrInvalidEvent,
-				Namespace: eh.NamespaceFromContext(ctx),
+			return &eh.EventStoreError{
+				Err:              eh.ErrMismatchedEventAggregateIDs,
+				Op:               eh.EventStoreOpSave,
+				AggregateType:    at,
+				AggregateID:      id,
+				AggregateVersion: originalVersion,
+				Events:           events,
 			}
 		}
 
 		// Only accept events that apply to the correct aggregate version.
 		if event.Version() != version+1 {
-			return eh.EventStoreError{
-				Err:       eh.ErrIncorrectEventVersion,
-				Namespace: eh.NamespaceFromContext(ctx),
+			return &eh.EventStoreError{
+				Err:              eh.ErrIncorrectEventVersion,
+				Op:               eh.EventStoreOpSave,
+				AggregateType:    at,
+				AggregateID:      id,
+				AggregateVersion: originalVersion,
+				Events:           events,
 			}
 		}
 
@@ -135,16 +145,22 @@ func (s *EventStore) Save(ctx context.Context, events []eh.Event, originalVersio
 		// empty list.
 		if err := table.Put(e).If("attribute_not_exists(AggregateID) AND attribute_not_exists(Version)").Run(); err != nil {
 			if err, ok := err.(awserr.RequestFailure); ok && err.Code() == "ConditionalCheckFailedException" {
-				return eh.EventStoreError{
-					BaseErr:   err,
-					Err:       ErrCouldNotSaveAggregate,
-					Namespace: eh.NamespaceFromContext(ctx),
+				return &eh.EventStoreError{
+					Err:              ErrCouldNotSaveAggregate,
+					Op:               eh.EventStoreOpSave,
+					AggregateType:    at,
+					AggregateID:      id,
+					AggregateVersion: originalVersion,
+					Events:           events,
 				}
 			}
-			return eh.EventStoreError{
-				BaseErr:   err,
-				Err:       err,
-				Namespace: eh.NamespaceFromContext(ctx),
+			return &eh.EventStoreError{
+				Err:              err,
+				Op:               eh.EventStoreOpSave,
+				AggregateType:    at,
+				AggregateID:      id,
+				AggregateVersion: originalVersion,
+				Events:           events,
 			}
 		}
 	}
@@ -161,10 +177,10 @@ func (s *EventStore) Load(ctx context.Context, id uuid.UUID) ([]eh.Event, error)
 	if err, ok := err.(awserr.RequestFailure); ok && err.Code() == "ResourceNotFoundException" {
 		return []eh.Event{}, nil
 	} else if err != nil {
-		return nil, eh.EventStoreError{
-			BaseErr:   err,
-			Err:       err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return nil, &eh.EventStoreError{
+			Err:         err,
+			Op:          eh.EventStoreOpLoad,
+			AggregateID: id,
 		}
 	}
 
@@ -178,10 +194,9 @@ func (s *EventStore) LoadAll(ctx context.Context) ([]eh.Event, error) {
 	var dbEvents []dbEvent
 	err := table.Scan().Consistent(true).All(&dbEvents)
 	if err != nil {
-		return nil, eh.EventStoreError{
-			BaseErr:   err,
-			Err:       err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return nil, &eh.EventStoreError{
+			Err: err,
+			Op:  eh.EventStoreOpLoad,
 		}
 	}
 
@@ -195,10 +210,9 @@ func (s *EventStore) buildEvents(ctx context.Context, dbEvents []dbEvent) ([]eh.
 		if data, err := eh.CreateEventData(dbEvent.EventType); err == nil {
 			// Manually decode the raw event.
 			if err := dynamodbattribute.UnmarshalMap(dbEvent.RawData, data); err != nil {
-				return nil, eh.EventStoreError{
-					BaseErr:   err,
-					Err:       ErrCouldNotUnmarshalEvent,
-					Namespace: eh.NamespaceFromContext(ctx),
+				return nil, &eh.EventStoreError{
+					Err: ErrCouldNotUnmarshalEvent,
+					Op:  eh.EventStoreOpLoad,
 				}
 			}
 
@@ -219,10 +233,9 @@ func (s *EventStore) Replace(ctx context.Context, event eh.Event) error {
 
 	count, err := table.Get("AggregateID", event.AggregateID().String()).Consistent(true).Count()
 	if err != nil {
-		return eh.EventStoreError{
-			BaseErr:   err,
-			Err:       err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return &eh.EventStoreError{
+			Err: err,
+			Op:  eh.EventStoreOpReplace,
 		}
 	} else if count == 0 {
 		return eh.ErrAggregateNotFound
@@ -236,12 +249,11 @@ func (s *EventStore) Replace(ctx context.Context, event eh.Event) error {
 
 	if err := table.Put(e).If("attribute_exists(AggregateID) AND attribute_exists(Version)").Run(); err != nil {
 		if err, ok := err.(awserr.RequestFailure); ok && err.Code() == "ConditionalCheckFailedException" {
-			return eh.ErrInvalidEvent
+			return eh.ErrMissingEvent
 		}
-		return eh.EventStoreError{
-			BaseErr:   err,
-			Err:       err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return &eh.EventStoreError{
+			Err: err,
+			Op:  eh.EventStoreOpReplace,
 		}
 	}
 
@@ -255,19 +267,15 @@ func (s *EventStore) RenameEvent(ctx context.Context, from, to eh.EventType) err
 	var dbEvents []dbEvent
 	err := table.Scan().Filter("EventType = ?", from).Consistent(true).All(&dbEvents)
 	if err != nil {
-		return eh.EventStoreError{
-			BaseErr:   err,
-			Err:       err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return &eh.EventStoreError{
+			Err: err,
 		}
 	}
 
 	for _, dbEvent := range dbEvents {
 		if err := table.Update("AggregateID", dbEvent.AggregateID).Range("Version", dbEvent.Version).If("EventType = ?", from).Set("EventType", to).Run(); err != nil {
-			return eh.EventStoreError{
-				BaseErr:   err,
-				Err:       err,
-				Namespace: eh.NamespaceFromContext(ctx),
+			return &eh.EventStoreError{
+				Err: err,
 			}
 		}
 	}
@@ -315,8 +323,7 @@ func (s *EventStore) DeleteTable(ctx context.Context) error {
 // TableName appends the namespace, if one is set, to the table prefix to
 // get the name of the table to use.
 func (s *EventStore) TableName(ctx context.Context) string {
-	ns := eh.NamespaceFromContext(ctx)
-	return s.config.TablePrefix + "_" + ns
+	return s.config.TablePrefix + "_"
 }
 
 // dbEvent is the internal event record for the DynamoDB event store used
@@ -340,10 +347,8 @@ func newDBEvent(ctx context.Context, event eh.Event) (*dbEvent, error) {
 		var err error
 		rawData, err = dynamodbattribute.MarshalMap(event.Data())
 		if err != nil {
-			return nil, eh.EventStoreError{
-				BaseErr:   err,
-				Err:       ErrCouldNotMarshalEvent,
-				Namespace: eh.NamespaceFromContext(ctx),
+			return nil, &eh.EventStoreError{
+				Err: ErrCouldNotMarshalEvent,
 			}
 		}
 	}
@@ -397,4 +402,8 @@ func (e event) Version() int {
 // String implements the String method of the eventhorizon.Event interface.
 func (e event) String() string {
 	return fmt.Sprintf("%s@%d", e.dbEvent.EventType, e.dbEvent.Version)
+}
+
+func (e event) Metadata() map[string]interface{} {
+	return make(map[string]interface{})
 }

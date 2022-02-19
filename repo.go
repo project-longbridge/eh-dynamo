@@ -80,9 +80,9 @@ func (r *Repo) Parent() eh.ReadRepo {
 // Find implements the Find method of the eventhorizon.ReadRepo interface.
 func (r *Repo) Find(ctx context.Context, id uuid.UUID) (eh.Entity, error) {
 	if r.factoryFn == nil {
-		return nil, eh.RepoError{
-			Err:       ErrModelNotSet,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return nil, &eh.RepoError{
+			Err: ErrModelNotSet,
+			Op:  eh.AggregateStoreOpLoad,
 		}
 	}
 
@@ -92,10 +92,9 @@ func (r *Repo) Find(ctx context.Context, id uuid.UUID) (eh.Entity, error) {
 	err := table.Get("ID", id.String()).Consistent(true).One(entity)
 
 	if err != nil {
-		return nil, eh.RepoError{
-			Err:       eh.ErrEntityNotFound,
-			BaseErr:   err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return nil, &eh.RepoError{
+			Err: eh.ErrEntityNotFound,
+			Op:  eh.AggregateStoreOpLoad,
 		}
 	}
 
@@ -105,9 +104,9 @@ func (r *Repo) Find(ctx context.Context, id uuid.UUID) (eh.Entity, error) {
 // FindAll implements the FindAll method of the eventhorizon.ReadRepo interface.
 func (r *Repo) FindAll(ctx context.Context) ([]eh.Entity, error) {
 	if r.factoryFn == nil {
-		return nil, eh.RepoError{
-			Err:       ErrModelNotSet,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return nil, &eh.RepoError{
+			Err: ErrModelNotSet,
+			Op:  eh.AggregateStoreOpLoad,
 		}
 	}
 
@@ -127,9 +126,9 @@ func (r *Repo) FindAll(ctx context.Context) ([]eh.Entity, error) {
 // FindWithFilter allows to find entities with a filter
 func (r *Repo) FindWithFilter(ctx context.Context, expr string, args ...interface{}) ([]eh.Entity, error) {
 	if r.factoryFn == nil {
-		return nil, eh.RepoError{
-			Err:       ErrModelNotSet,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return nil, &eh.RepoError{
+			Err: ErrModelNotSet,
+			Op:  eh.AggregateStoreOpLoad,
 		}
 	}
 
@@ -149,9 +148,9 @@ func (r *Repo) FindWithFilter(ctx context.Context, expr string, args ...interfac
 // FindWithFilterUsingIndex allows to find entities with a filter using an index
 func (r *Repo) FindWithFilterUsingIndex(ctx context.Context, indexInput IndexInput, filterQuery string, filterArgs ...interface{}) ([]eh.Entity, error) {
 	if r.factoryFn == nil {
-		return nil, eh.RepoError{
-			Err:       ErrModelNotSet,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return nil, &eh.RepoError{
+			Err: ErrModelNotSet,
+			Op:  eh.AggregateStoreOpLoad,
 		}
 	}
 
@@ -178,18 +177,16 @@ func (r *Repo) Save(ctx context.Context, entity eh.Entity) error {
 	table := r.service.Table(r.config.TableName)
 
 	if entity.EntityID() == uuid.Nil {
-		return eh.RepoError{
-			Err:       eh.ErrCouldNotSaveEntity,
-			BaseErr:   eh.ErrMissingEntityID,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return &eh.RepoError{
+			Err: eh.ErrMissingAggregateID,
+			Op:  eh.AggregateStoreOpSave,
 		}
 	}
 
 	if err := table.Put(entity).Run(); err != nil {
-		return eh.RepoError{
-			Err:       eh.ErrCouldNotSaveEntity,
-			BaseErr:   err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return &eh.RepoError{
+			Err: err,
+			Op:  eh.AggregateStoreOpSave,
 		}
 	}
 
@@ -201,10 +198,9 @@ func (r *Repo) Remove(ctx context.Context, id uuid.UUID) error {
 	table := r.service.Table(r.config.TableName)
 
 	if err := table.Delete("ID", id.String()).Run(); err != nil {
-		return eh.RepoError{
-			Err:       eh.ErrEntityNotFound,
-			BaseErr:   err,
-			Namespace: eh.NamespaceFromContext(ctx),
+		return &eh.RepoError{
+			Err: err,
+			Op:  eh.AggregateStoreOpSave,
 		}
 	}
 
