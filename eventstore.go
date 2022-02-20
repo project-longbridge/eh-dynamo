@@ -44,14 +44,14 @@ var ErrCouldNotSaveAggregate = errors.New("could not save aggregate")
 
 // EventStoreConfig is a config for the DynamoDB event store.
 type EventStoreConfig struct {
-	TablePrefix string
-	Region      string
-	Endpoint    string
+	TableName string
+	Region    string
+	Endpoint  string
 }
 
 func (c *EventStoreConfig) provideDefaults() {
-	if c.TablePrefix == "" {
-		c.TablePrefix = "eventhorizonEvents"
+	if c.TableName == "" {
+		c.TableName = "eventhorizonEvents"
 	}
 	if c.Region == "" {
 		c.Region = "us-east-1"
@@ -327,7 +327,7 @@ func (s *EventStore) DeleteTable(ctx context.Context) error {
 // TableName appends the namespace, if one is set, to the table prefix to
 // get the name of the table to use.
 func (s *EventStore) TableName(ctx context.Context) string {
-	return s.config.TablePrefix + "_"
+	return s.config.TableName
 }
 
 // dbEvent is the internal event record for the DynamoDB event store used
@@ -341,6 +341,7 @@ type dbEvent struct {
 	data          eh.EventData
 	Timestamp     time.Time
 	AggregateType eh.AggregateType
+	Metadata      map[string]interface{}
 }
 
 // newDBEvent returns a new dbEvent for an event.
@@ -364,6 +365,7 @@ func newDBEvent(ctx context.Context, event eh.Event) (*dbEvent, error) {
 		AggregateType: event.AggregateType(),
 		AggregateID:   event.AggregateID(),
 		Version:       event.Version(),
+		Metadata:      event.Metadata(),
 	}, nil
 }
 
@@ -409,5 +411,5 @@ func (e event) String() string {
 }
 
 func (e event) Metadata() map[string]interface{} {
-	return make(map[string]interface{})
+	return e.dbEvent.Metadata
 }
